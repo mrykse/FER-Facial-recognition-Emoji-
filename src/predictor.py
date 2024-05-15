@@ -10,11 +10,11 @@ import glob
 import tqdm
 
 sys.path.append(os.path.join(os.path.dirname(__file__), os.pardir))
-from src.trainer import model
+from src.trainer import build_model
+
 from src.__init__ import *
 
-
-config = tf.ConfigProto()
+config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 
 
@@ -25,11 +25,9 @@ def softmax(x):
 
 
 def inference(sess, gray_img_input):
-    
     img = gray_img_input.reshape(1, 48, 48, 1).astype(float) / 255
-    
-    y_c = sess.run(y_conv, feed_dict={X:img, keep_prob:1.0})
-    
+
+    y_c = model.predict(img)
     y_c = softmax(y_c)
     p = np.argmax(y_c, axis=1)
     score = np.max(y_c)
@@ -39,17 +37,16 @@ def inference(sess, gray_img_input):
         predicted-emotion: {},
         confidence: {}'''.format(y_c, p[0], index_emo[p[0]], score))
     return p[0], score
-        
+
 
 def from_cam(sess):
-    
     face_cascade = cv2.CascadeClassifier(config_parser['OPEN_CV']['cascade_classifier_path'])
     cap = cv2.VideoCapture(0)
 
-    font               = cv2.FONT_HERSHEY_SIMPLEX
-    fontScale          = 1
-    fontColor          = (255,255,255)
-    lineType           = 2
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    fontScale = 1
+    fontColor = (255, 255, 255)
+    lineType = 2
 
     while True:
         # Capture frame-by-frame
@@ -62,49 +59,35 @@ def from_cam(sess):
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
         # draw the rectangle (bounding-boxes)
-        for (x,y,w,h) in faces:
-            cv2.rectangle(gray, (x,y), (x+w, y+h), (255,0,0), 2)
-            bottomLeftCornerOfText = (x+10,y+h+10)
-
-            face_img_gray = gray[y:y+h, x:x+w]
+        for (x, y, w, h) in faces:
+            face_img_gray = gray[y:y + h, x:x + w]
             face_img_gray = cv2.resize(face_img_gray, (48, 48))
             s = time.time()
-            p, confidence = inference(sess, face_img_gray)
+            emotion_name, confidence = inference(model, face_img_gray)
             logger.critical('model inference time: {}'.format(time.time() - s))
-            
-            if confidence > 0.5:
-            
-                img2 = emoji_to_pic[index_emo[p]]
-                img2 = cv2.resize(img2, (w, h))
 
-                alpha = img2[:,:,3]/255.0
+            # Displaying emotion name
+            text = f'Predicted Emotion: {emotion_name}'
+            text_size = cv2.getTextSize(text, font, fontScale, lineType)[0]
+            text_x = x + (w - text_size[0]) // 2
+            text_y = y - 10
+            cv2.putText(frame, text, (text_x, text_y), font, fontScale, fontColor, lineType)
 
-                frame[y:y+h, x:x+w, 0] = frame[y:y+h, x:x+w, 0] * (1-alpha) + alpha * img2[:,:,0]
-                frame[y:y+h, x:x+w, 1] = frame[y:y+h, x:x+w, 1] * (1-alpha) + alpha * img2[:,:,1]
-                frame[y:y+h, x:x+w, 2] = frame[y:y+h, x:x+w, 2] * (1-alpha) + alpha * img2[:,:,2]
+            # Displaying the emoji
+            emoji_name = index_emo[emotion_name]
+            if emoji_name in emoji_to_pic:
+                emoji_img = emoji_to_pic[emoji_name]
+                emoji_img = cv2.resize(emoji_img, (w, h))
 
-                cv2.putText(frame,f'Confidence: {round(confidence, 2)}',
-                            bottomLeftCornerOfText,
-                            font,
-                            fontScale,
-                            fontColor,
-                            lineType)
-
-            else: 
-                cv2.putText(frame,'NEUTRAL', 
-                            bottomLeftCornerOfText, 
-                            font, 
-                            fontScale,
-                            fontColor,
-                            lineType)
+                # Replace the frame region with the emoji image directly
+                frame[y:y + h, x:x + w, :] = emoji_img[:, :, :3]  # Exclude the alpha channel
 
         # Display the resulting frame
-        cv2.imshow('gray-scale', gray)
         cv2.imshow('faces', frame)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-            
+
     cap.release()
     cv2.destroyAllWindows()
 
@@ -114,11 +97,11 @@ if __name__ == '__main__':
     logger = logging.getLogger('emojifier.predictor')
     CHECKPOINT_SAVE_PATH = os.path.join(os.path.dirname(__file__), os.pardir, 'model_checkpoints')
     EMOJI_FILE_PATH = os.path.join(os.path.dirname(__file__), os.pardir, 'emoji')
-    tf.reset_default_graph()
+    tf.compat.v1.reset_default_graph()
 
     # used to map the output from the prediction to the emotion class
-    index_emo = {v:k for k,v in EMOTION_MAP.items()}
-    
+    index_emo = {v: k for k, v in EMOTION_MAP.items()}
+
     # dictionary of emoji name and the corresponding read image
     emoji_to_pic = {k: None for k in EMOTION_MAP.keys()}
 
@@ -138,19 +121,12 @@ if __name__ == '__main__':
         logger.debug('file path: {}'.format(file))
         emoji_to_pic[file.split(split_string)[-1].split('.')[0]] = cv2.imread(file, -1)
 
-    X = tf.placeholder(
-        tf.float32, shape=[None, 48, 48, 1]
-    )
-    
-    keep_prob = tf.placeholder(tf.float32)
+    num_classes = 6  # Replace with the actual number of classes in your problem
+    input_shape = (48, 48, 1)
+    model = build_model(input_shape, num_classes)
 
-    y_conv = model(X, keep_prob)
-    
-    saver = tf.train.Saver()
-    
-    with tf.Session(config=config) as sess:
-        saver.restore(sess, os.path.join(CHECKPOINT_SAVE_PATH, 'model.ckpt'))
+    model.load_weights(os.path.join(CHECKPOINT_SAVE_PATH, 'model.h5'))
 
-        logger.info('Opening the camera for getting the video feed ...')
-        logger.info('PRESS "q" AT ANY TIME TO EXIT!')
-        from_cam(sess)
+    logger.info('Opening the camera for getting the video feed ...')
+    logger.info('PRESS "q" AT ANY TIME TO EXIT!')
+    from_cam(model)

@@ -1,8 +1,5 @@
-# facial_emotion_recognition__EMOJIFIER
+# Facail emoji recognition (update)
 Recognizes the facial emotion and overlays emoji, equivalent to the emotion, on the persons face.  
-
-## Some results First!  
-![res](https://user-images.githubusercontent.com/20581741/46920875-34492e00-d012-11e8-81ac-fb9a69a40a57.gif)  
 
 ## Getting Started
 1. ### Get the code:
@@ -58,6 +55,3 @@ There are 4 steps **from nothing** (not even a single image) **to getting the re
     - this will open the cam, and start taking the video feed -- NOW YOU HAVE DONE IT ALL. :clap:  
     
 Its time to show your emotions :heart:
-
-> ### P.S. -- The model was trained on my facial images only, but was able to detect the expressions of my brother as well.  
-![result](https://user-images.githubusercontent.com/20581741/46920764-a4ef4b00-d010-11e8-943e-79623139d073.gif)
